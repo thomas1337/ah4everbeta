@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111827">
+    <title>Auktionshaus-Scans</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <span class="eyebrow">WORLD OF WARCRAFT</span>
+        <h1>Auktionshaus-Scans</h1>
+      </div>
+      <div class="search-panel">
+        <div class="search-heading">
+          <label for="item-search">Item suchen</label>
+          <span id="scan-count" class="muted"></span>
+        </div>
+        <div class="search-wrap">
+          <input
+            id="item-search"
+            type="search"
+            autocomplete="off"
+            placeholder="Mindestens 2 Zeichen eingeben"
+            aria-autocomplete="list"
+            aria-controls="suggestions"
+            aria-expanded="false"
+          >
+          <ul id="suggestions" class="suggestions" role="listbox" hidden></ul>
+        </div>
+        <p id="search-hint" class="search-hint">Items aus allen Scans durchsuchen.</p>
+      </div>
+    </header>
+
+    <main>
+      <section id="workspace" class="workspace" hidden>
+        <section id="chart-panel" class="chart-panel" aria-live="polite">
+          <div id="chart-empty" class="chart-empty">
+            <span class="empty-mark" aria-hidden="true">↗</span>
+            <h2>Preisverlauf entdecken</h2>
+            <p>Suche ein Item, um dessen Preisentwicklung über alle Scans zu sehen.</p>
+          </div>
+          <div id="chart-content" hidden>
+            <div class="chart-heading">
+              <div>
+                <span class="eyebrow">PREISENTWICKLUNG</span>
+                <h2 id="chart-title"></h2>
+              </div>
+              <div class="chart-controls">
+                <span id="chart-subtitle" class="muted chart-subtitle"></span>
+                <label class="metric-picker">
+                  <span>Y-Achse</span>
+                  <select id="metric-select" aria-label="Wert der Y-Achse">
+                    <option value="lowestBuyout" selected>Lowest Buyout</option>
+                    <option value="availableQuantity">Quantity</option>
+                    <option value="averagePrice">Average Price</option>
+                    <option value="medianPrice">Median Price</option>
+                    <option value="highestBuyout">Highest Buyout</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+            <div id="chart" class="chart" role="img"></div>
+            <div id="chart-tooltip" class="chart-tooltip" hidden></div>
+          </div>
+        </section>
+      </section>
+      <div id="loading" class="status-message">Scandaten werden geladen …</div>
+      <div id="error" class="status-message error" role="alert" hidden></div>
+    </main>
+  </body>
+</html>
