@@ -90,8 +90,7 @@ function showSuggestions() {
   }
   suggestionItems = itemCatalog
     .filter((item) => item.itemName.toLocaleLowerCase("de").includes(query))
-    .sort((left, right) => left.itemName.localeCompare(right.itemName, "de") || left.itemID - right.itemID)
-    .slice(0, 10);
+    .sort((left, right) => left.itemName.localeCompare(right.itemName, "de") || left.itemID - right.itemID);
   elements.suggestions.replaceChildren();
   for (const [index, item] of suggestionItems.entries()) {
     const row = document.createElement("li");
