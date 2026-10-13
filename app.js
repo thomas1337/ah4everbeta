@@ -21,10 +21,16 @@ const dateFormat = new Intl.DateTimeFormat("de-DE", {
   timeStyle: "short",
   timeZone: "UTC",
 });
+const WATCHLIST_STORAGE_KEY = "ahscans-watchlist-v1";
+const MAX_CANDIDATES = 100;
+const REFERENCE_WINDOW = 5;
+const MAX_DATA_AGE_HOURS = 72;
 
 const elements = {
   scanCount: document.querySelector("#scan-count"),
+  datasetNote: document.querySelector("#dataset-note"),
   workspace: document.querySelector("#workspace"),
+  chartPanel: document.querySelector("#chart-panel"),
   loading: document.querySelector("#loading"),
   error: document.querySelector("#error"),
   search: document.querySelector("#item-search"),
@@ -33,16 +39,43 @@ const elements = {
   chartEmpty: document.querySelector("#chart-empty"),
   chartContent: document.querySelector("#chart-content"),
   chartTitle: document.querySelector("#chart-title"),
+  wowheadLink: document.querySelector("#wowhead-link"),
   chartSubtitle: document.querySelector("#chart-subtitle"),
+  selectedTradingMetrics: document.querySelector("#selected-trading-metrics"),
+  selectedRoi: document.querySelector("#selected-roi"),
+  selectedProfit: document.querySelector("#selected-profit"),
+  selectedThresholds: document.querySelector("#selected-thresholds"),
   metricSelect: document.querySelector("#metric-select"),
   chart: document.querySelector("#chart"),
   tooltip: document.querySelector("#chart-tooltip"),
+  feeInput: document.querySelector("#fee-input"),
+  roiInput: document.querySelector("#roi-input"),
+  maxRoiInput: document.querySelector("#max-roi-input"),
+  profitInput: document.querySelector("#profit-input"),
+  maxProfitInput: document.querySelector("#max-profit-input"),
+  observationsInput: document.querySelector("#observations-input"),
+  candidateRows: document.querySelector("#candidate-rows"),
+  candidateStatus: document.querySelector("#candidate-status"),
+  watchlistRows: document.querySelector("#watchlist-rows"),
+  watchlistCount: document.querySelector("#watchlist-count"),
+  watchlistStatus: document.querySelector("#watchlist-status"),
+  backtestHorizon: document.querySelector("#backtest-horizon"),
+  backtestTrades: document.querySelector("#backtest-trades"),
+  backtestWinRate: document.querySelector("#backtest-win-rate"),
+  backtestAverageRoi: document.querySelector("#backtest-average-roi"),
+  backtestAverageProfit: document.querySelector("#backtest-average-profit"),
+  backtestAverageHold: document.querySelector("#backtest-average-hold"),
+  backtestDrawdown: document.querySelector("#backtest-drawdown"),
+  backtestStatus: document.querySelector("#backtest-status"),
+  backtestRows: document.querySelector("#backtest-rows"),
 };
 
 let scans = [];
 let selectedItemId = null;
 let selectedMetric = "lowestBuyout";
 let itemCatalog = [];
+let itemHistory = new Map();
+let watchlist = [];
 let suggestionItems = [];
 let activeSuggestion = -1;
 
@@ -71,12 +104,489 @@ function validateData(data) {
   }
   scans = [...data.scans].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp));
   const itemsById = new Map();
+  itemHistory = new Map();
   for (const scan of scans) {
     for (const item of scan.items) {
       itemsById.set(item.itemID, item);
+      if (!itemHistory.has(item.itemID)) itemHistory.set(item.itemID, []);
+      itemHistory.get(item.itemID).push({ timestamp: scan.timestamp, item });
     }
   }
   itemCatalog = [...itemsById.values()];
+}
+
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function quantile(values, fraction) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  const position = (sorted.length - 1) * fraction;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+function getTradingSettings() {
+  return {
+    feeRate: Number(elements.feeInput.value) / 100,
+    minimumRoi: Number(elements.roiInput.value) / 100,
+    maximumRoi: elements.maxRoiInput.value.trim() === "" ? null : Number(elements.maxRoiInput.value) / 100,
+    minimumProfit: Number(elements.profitInput.value),
+    maximumProfit: elements.maxProfitInput.value.trim() === "" ? null : Number(elements.maxProfitInput.value),
+    minimumObservations: Number(elements.observationsInput.value),
+  };
+}
+
+function getMarketStats(itemId) {
+  const history = itemHistory.get(itemId) ?? [];
+  const recent = history.slice(-REFERENCE_WINDOW);
+  if (recent.length === 0) return null;
+  const latest = recent[recent.length - 1];
+  const prices = recent.map(({ item }) => item.medianPrice).filter((price) => price > 0);
+  if (prices.length === 0) return null;
+  const referencePrice = quantile(prices, 0.25);
+  const typicalPrice = median(prices);
+  const priceMad = median(prices.map((price) => Math.abs(price - typicalPrice)));
+  const priceVariation = typicalPrice > 0 ? priceMad / typicalPrice : 1;
+  const previous = history.length > 1 ? history[history.length - 2] : null;
+  const ageHours = Math.max(0, (Date.now() - Date.parse(latest.timestamp)) / 3600000);
+  const settings = getTradingSettings();
+  const maximumBuyPrice = settings.minimumRoi >= 0 && settings.feeRate < 1
+    ? Math.floor(referencePrice * (1 - settings.feeRate) / (1 + settings.minimumRoi))
+    : 0;
+  const netProfit = Math.floor(referencePrice * (1 - settings.feeRate) - latest.item.lowestBuyout);
+  const roi = latest.item.lowestBuyout > 0
+    ? netProfit / latest.item.lowestBuyout
+    : Number.NEGATIVE_INFINITY;
+  const inventoryChange = previous && previous.item.availableQuantity > 0
+    ? (latest.item.availableQuantity - previous.item.availableQuantity) / previous.item.availableQuantity
+    : null;
+  const averageMedianRatio = latest.item.medianPrice > 0
+    ? latest.item.averagePrice / latest.item.medianPrice
+    : Number.POSITIVE_INFINITY;
+  return {
+    history,
+    recent,
+    latest,
+    referencePrice,
+    priceVariation,
+    ageHours,
+    maximumBuyPrice,
+    netProfit,
+    roi,
+    inventoryChange,
+    averageMedianRatio,
+    observationCount: history.length,
+    isStable: priceVariation <= 0.3,
+    isFresh: ageHours <= MAX_DATA_AGE_HOURS,
+  };
+}
+
+function appendEmptyRow(tbody, message, colspan) {
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.className = "empty-row";
+  cell.colSpan = colspan;
+  cell.textContent = message;
+  row.append(cell);
+  tbody.append(row);
+}
+
+function createItemButton(item, { scrollToChart = false } = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "item-link";
+  button.textContent = item.itemName;
+  button.title = "Preisverlauf anzeigen";
+  button.addEventListener("click", () => selectItem(item, { scrollToChart }));
+  return button;
+}
+
+function formatPercent(value) {
+  return `${numberFormat.format(value * 100)}%`;
+}
+
+function renderCandidates() {
+  const settings = getTradingSettings();
+  const feeValid = Number.isFinite(settings.feeRate) && settings.feeRate >= 0 && settings.feeRate < 1;
+  const settingsValid = feeValid
+    && Number.isFinite(settings.minimumRoi) && settings.minimumRoi >= 0
+    && (settings.maximumRoi === null || (Number.isFinite(settings.maximumRoi) && settings.maximumRoi >= settings.minimumRoi))
+    && Number.isSafeInteger(settings.minimumProfit) && settings.minimumProfit >= 0
+    && (settings.maximumProfit === null || (Number.isSafeInteger(settings.maximumProfit) && settings.maximumProfit >= settings.minimumProfit))
+    && Number.isInteger(settings.minimumObservations) && settings.minimumObservations >= 1;
+  elements.candidateRows.replaceChildren();
+  if (!settingsValid) {
+    appendEmptyRow(elements.candidateRows, "Bitte gültige Filter eingeben. Obergrenzen müssen mindestens so hoch wie die jeweilige Untergrenze sein.", 8);
+    elements.candidateStatus.textContent = "Die Gebühr muss unter 100 % liegen; Beträge in Kupfer müssen ganze, nicht-negative Werte sein.";
+    renderSelectedTradingMetrics();
+    return;
+  }
+
+  const candidates = itemCatalog.flatMap((item) => {
+    const stats = getMarketStats(item.itemID);
+    if (!stats
+      || stats.observationCount < settings.minimumObservations
+      || stats.latest.item.lowestBuyout <= 0
+      || stats.maximumBuyPrice < stats.latest.item.lowestBuyout
+      || stats.netProfit < settings.minimumProfit
+      || (settings.maximumProfit !== null && stats.netProfit > settings.maximumProfit)
+      || stats.roi < settings.minimumRoi
+      || (settings.maximumRoi !== null && stats.roi > settings.maximumRoi)) return [];
+    return [{ item, stats }];
+  }).sort((left, right) => right.stats.netProfit - left.stats.netProfit);
+
+  for (const { item, stats } of candidates.slice(0, MAX_CANDIDATES)) {
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    nameCell.append(createItemButton(item, { scrollToChart: true }));
+    const id = document.createElement("small");
+    id.textContent = `ID ${item.itemID}`;
+    nameCell.append(id);
+
+    const lowestCell = document.createElement("td");
+    lowestCell.textContent = formatMoney(stats.latest.item.lowestBuyout);
+    const referenceCell = document.createElement("td");
+    referenceCell.textContent = formatMoney(stats.referencePrice);
+    const buyCell = document.createElement("td");
+    buyCell.textContent = formatMoney(stats.maximumBuyPrice);
+    const profitCell = document.createElement("td");
+    profitCell.textContent = `${formatMoney(stats.netProfit)} / ${formatPercent(stats.roi)}`;
+    const stockCell = document.createElement("td");
+    stockCell.textContent = numberFormat.format(stats.latest.item.availableQuantity);
+    const stockTrend = document.createElement("small");
+    stockTrend.textContent = stats.inventoryChange === null
+      ? "Trend nicht verfügbar"
+      : `Bestand ${stats.inventoryChange > 0 ? "+" : ""}${formatPercent(stats.inventoryChange)}`;
+    stockCell.append(stockTrend);
+    const confidenceCell = document.createElement("td");
+    const averageIsOutlier = stats.averageMedianRatio > 2 || stats.averageMedianRatio < 0.5;
+    const confidenceLabel = stats.isFresh && stats.observationCount >= Math.max(settings.minimumObservations, 5) && stats.isStable && !averageIsOutlier
+      ? "Gut"
+      : stats.isFresh && stats.observationCount >= settings.minimumObservations
+        ? "Mittel"
+        : "Schwach";
+    confidenceCell.textContent = `${confidenceLabel} · ${stats.observationCount} Scans`;
+    const confidenceDetail = document.createElement("small");
+    const vendorDownside = Math.max(0, stats.latest.item.lowestBuyout - stats.latest.item.vendorSellPrice);
+    confidenceDetail.textContent = `MAD ${formatPercent(stats.priceVariation)} · Ø/Median ${numberFormat.format(stats.averageMedianRatio)}${averageIsOutlier ? " (Ausreißer)" : ""} · Vendor-Risiko ${formatMoney(vendorDownside)} · ${numberFormat.format(stats.ageHours)} Std. alt`;
+    confidenceCell.append(confidenceDetail);
+    const actionCell = document.createElement("td");
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "table-action";
+    const alreadyWatching = watchlist.some((entry) => entry.itemID === item.itemID);
+    addButton.textContent = alreadyWatching ? "Auf Watchlist" : "Merken";
+    addButton.disabled = alreadyWatching;
+    addButton.addEventListener("click", () => addToWatchlist(item, stats));
+    actionCell.append(addButton);
+    row.append(nameCell, lowestCell, referenceCell, buyCell, profitCell, stockCell, confidenceCell, actionCell);
+    elements.candidateRows.append(row);
+  }
+
+  elements.candidateStatus.textContent = candidates.length === 0
+    ? "Keine Kandidaten erfüllen derzeit alle Schwellenwerte."
+    : `${candidates.length} Kandidaten gefunden${candidates.length > MAX_CANDIDATES ? ` · erste ${MAX_CANDIDATES} nach erwartetem Netto-Gewinn angezeigt` : ""}. Gewinnschätzung gilt pro Stück und unterstellt den Verkauf zum konservativen Referenzpreis.`;
+  renderSelectedTradingMetrics();
+}
+
+function loadWatchlist() {
+  try {
+    const saved = localStorage.getItem(WATCHLIST_STORAGE_KEY);
+    if (saved === null) return;
+    const parsed = JSON.parse(saved);
+    if (!Array.isArray(parsed) || parsed.some((entry) =>
+      !entry
+      || !Number.isInteger(entry.itemID)
+      || !Number.isFinite(entry.buyTarget)
+      || entry.buyTarget < 0
+      || !Number.isFinite(entry.sellTarget)
+      || entry.sellTarget < 0)) {
+      throw new Error("Die gespeicherte Watchlist hat ein ungültiges Format.");
+    }
+    watchlist = parsed.filter((entry) => itemHistory.has(entry.itemID));
+  } catch (error) {
+    elements.watchlistStatus.classList.add("error-text");
+    elements.watchlistStatus.textContent = error instanceof Error
+      ? `Watchlist konnte nicht geladen werden: ${error.message}`
+      : "Watchlist konnte nicht geladen werden.";
+  }
+}
+
+function saveWatchlist() {
+  try {
+    localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(watchlist));
+    elements.watchlistStatus.classList.remove("error-text");
+    elements.watchlistStatus.textContent = "Watchlist in diesem Browser gespeichert.";
+    return true;
+  } catch (error) {
+    elements.watchlistStatus.classList.add("error-text");
+    elements.watchlistStatus.textContent = error instanceof Error
+      ? `Watchlist konnte nicht gespeichert werden: ${error.message}`
+      : "Watchlist konnte nicht gespeichert werden.";
+    return false;
+  }
+}
+
+function addToWatchlist(item, stats) {
+  if (watchlist.some((entry) => entry.itemID === item.itemID)) return;
+  watchlist.push({
+    itemID: item.itemID,
+    buyTarget: stats.maximumBuyPrice,
+    sellTarget: Math.round(stats.referencePrice),
+  });
+  saveWatchlist();
+  renderMarketViews();
+}
+
+function createTargetInput(entry, field, label) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.step = "1";
+  input.value = String(entry[field]);
+  input.setAttribute("aria-label", `${label} für ${itemCatalog.find((item) => item.itemID === entry.itemID)?.itemName ?? entry.itemID} in Kupfer`);
+  input.addEventListener("change", () => {
+    const value = Number(input.value);
+    if (!Number.isSafeInteger(value) || value < 0) {
+      elements.watchlistStatus.classList.add("error-text");
+      elements.watchlistStatus.textContent = "Kauf- und Verkaufsziele müssen nicht-negative ganze Kupferwerte sein.";
+      input.value = String(entry[field]);
+      return;
+    }
+    entry[field] = value;
+    saveWatchlist();
+    renderWatchlist();
+  });
+  return input;
+}
+
+function renderWatchlist() {
+  elements.watchlistRows.replaceChildren();
+  elements.watchlistCount.textContent = String(watchlist.length);
+  if (watchlist.length === 0) {
+    appendEmptyRow(elements.watchlistRows, "Noch keine Items gespeichert. Kandidaten über „Merken“ hinzufügen.", 6);
+    return;
+  }
+  for (const entry of watchlist) {
+    const item = itemCatalog.find((candidate) => candidate.itemID === entry.itemID);
+    const stats = getMarketStats(entry.itemID);
+    if (!item || !stats) continue;
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    nameCell.append(createItemButton(item));
+    const lowestCell = document.createElement("td");
+    lowestCell.textContent = formatMoney(stats.latest.item.lowestBuyout);
+    const buyCell = document.createElement("td");
+    buyCell.append(createTargetInput(entry, "buyTarget", "Kauflimit"));
+    const sellCell = document.createElement("td");
+    sellCell.append(createTargetInput(entry, "sellTarget", "Verkaufsziel"));
+    const signalCell = document.createElement("td");
+    const signal = document.createElement("span");
+    const buyReached = stats.latest.item.lowestBuyout > 0 && stats.latest.item.lowestBuyout <= entry.buyTarget;
+    const targetReachable = entry.sellTarget * (1 - getTradingSettings().feeRate) > entry.buyTarget;
+    signal.className = `signal ${buyReached && targetReachable ? "good" : targetReachable ? "watch" : "weak"}`;
+    const expectedTargetRoi = entry.buyTarget > 0
+      ? (entry.sellTarget * (1 - getTradingSettings().feeRate) - entry.buyTarget) / entry.buyTarget
+      : Number.POSITIVE_INFINITY;
+    const targetRoiLabel = entry.buyTarget > 0 ? formatPercent(expectedTargetRoi) : "ROI n/a";
+    signal.textContent = !targetReachable
+      ? "Ziel nicht profitabel"
+      : buyReached
+        ? `Limit im letzten Scan erreicht · ${targetRoiLabel}`
+        : `Beobachten · ${targetRoiLabel}`;
+    signalCell.append(signal);
+    const actionCell = document.createElement("td");
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "table-action";
+    removeButton.textContent = "Entfernen";
+    removeButton.setAttribute("aria-label", `${item.itemName} von der Watchlist entfernen`);
+    removeButton.addEventListener("click", () => {
+      watchlist = watchlist.filter((candidate) => candidate.itemID !== entry.itemID);
+      saveWatchlist();
+      renderMarketViews();
+    });
+    actionCell.append(removeButton);
+    row.append(nameCell, lowestCell, buyCell, sellCell, signalCell, actionCell);
+    elements.watchlistRows.append(row);
+  }
+}
+
+function renderMarketViews() {
+  renderCandidates();
+  renderWatchlist();
+  renderBacktest();
+}
+
+function simulateItemBacktest(item, settings, horizon) {
+  const history = itemHistory.get(item.itemID) ?? [];
+  const referenceWindow = Math.max(REFERENCE_WINDOW, settings.minimumObservations);
+  const trades = [];
+  let incompleteSignals = 0;
+  let index = settings.minimumObservations;
+
+  while (index < history.length) {
+    const entry = history[index];
+    const referencePrices = history
+      .slice(Math.max(0, index - referenceWindow), index)
+      .map(({ item: observed }) => observed.medianPrice)
+      .filter((price) => price > 0);
+    if (referencePrices.length < settings.minimumObservations || entry.item.lowestBuyout <= 0) {
+      index += 1;
+      continue;
+    }
+
+    const buyReference = quantile(referencePrices, 0.25);
+    const buyPriceLimit = Math.floor(buyReference * (1 - settings.feeRate) / (1 + settings.minimumRoi));
+    const expectedProfit = Math.floor(buyReference * (1 - settings.feeRate) - entry.item.lowestBuyout);
+    const expectedRoi = expectedProfit / entry.item.lowestBuyout;
+    if (entry.item.lowestBuyout > buyPriceLimit
+      || expectedProfit < settings.minimumProfit
+      || (settings.maximumProfit !== null && expectedProfit > settings.maximumProfit)
+      || (settings.maximumRoi !== null && expectedRoi > settings.maximumRoi)) {
+      index += 1;
+      continue;
+    }
+
+    const finalExitIndex = Math.min(index + horizon, history.length - 1);
+    if (finalExitIndex - index < horizon) {
+      incompleteSignals += 1;
+      index += 1;
+      continue;
+    }
+
+    let exitIndex = finalExitIndex;
+    let exitReference = 0;
+    let targetReached = false;
+    let maxAdverseExcursion = 0;
+    for (let futureIndex = index + 1; futureIndex <= finalExitIndex; futureIndex += 1) {
+      const future = history[futureIndex];
+      const observedPrices = history
+        .slice(Math.max(0, futureIndex - referenceWindow + 1), futureIndex + 1)
+        .map(({ item: observed }) => observed.medianPrice)
+        .filter((price) => price > 0);
+      const conservativePrice = quantile(observedPrices, 0.25);
+      if (future.item.lowestBuyout > 0) {
+        maxAdverseExcursion = Math.max(
+          maxAdverseExcursion,
+          Math.max(0, (entry.item.lowestBuyout - future.item.lowestBuyout) / entry.item.lowestBuyout),
+        );
+      }
+      const netProfit = Math.floor(conservativePrice * (1 - settings.feeRate) - entry.item.lowestBuyout);
+      const netRoi = netProfit / entry.item.lowestBuyout;
+      exitIndex = futureIndex;
+      exitReference = conservativePrice;
+      if (netRoi >= settings.minimumRoi) {
+        targetReached = true;
+        break;
+      }
+    }
+
+    const netProfit = Math.floor(exitReference * (1 - settings.feeRate) - entry.item.lowestBuyout);
+    trades.push({
+      netProfit,
+      roi: netProfit / entry.item.lowestBuyout,
+      holdingHours: (Date.parse(history[exitIndex].timestamp) - Date.parse(entry.timestamp)) / 3600000,
+      maxAdverseExcursion,
+      targetReached,
+    });
+    index = exitIndex + 1;
+  }
+
+  if (trades.length === 0) return { trades, incompleteSignals };
+  const totalProfit = trades.reduce((total, trade) => total + trade.netProfit, 0);
+  return {
+    trades,
+    incompleteSignals,
+    totalProfit,
+    profitableTrades: trades.filter((trade) => trade.netProfit > 0).length,
+    targetTrades: trades.filter((trade) => trade.targetReached).length,
+    averageRoi: trades.reduce((total, trade) => total + trade.roi, 0) / trades.length,
+    averageHoldingHours: trades.reduce((total, trade) => total + trade.holdingHours, 0) / trades.length,
+    maxAdverseExcursion: Math.max(...trades.map((trade) => trade.maxAdverseExcursion)),
+  };
+}
+
+function renderBacktest() {
+  const settings = getTradingSettings();
+  const horizon = Number(elements.backtestHorizon.value);
+  const validSettings = Number.isFinite(settings.feeRate)
+    && settings.feeRate >= 0 && settings.feeRate < 1
+    && Number.isFinite(settings.minimumRoi) && settings.minimumRoi >= 0
+    && (settings.maximumRoi === null || (Number.isFinite(settings.maximumRoi) && settings.maximumRoi >= settings.minimumRoi))
+    && Number.isSafeInteger(settings.minimumProfit) && settings.minimumProfit >= 0
+    && (settings.maximumProfit === null || (Number.isSafeInteger(settings.maximumProfit) && settings.maximumProfit >= settings.minimumProfit))
+    && Number.isInteger(settings.minimumObservations) && settings.minimumObservations >= 1;
+  elements.backtestRows.replaceChildren();
+  if (!validSettings || !Number.isInteger(horizon) || horizon < 1 || horizon >= scans.length) {
+    appendEmptyRow(elements.backtestRows, "Bitte gültige Handelsfilter und eine Haltedauer kleiner als die Scan-Anzahl eingeben.", 7);
+    elements.backtestStatus.textContent = "";
+    elements.backtestTrades.textContent = "–";
+    elements.backtestWinRate.textContent = "–";
+    elements.backtestAverageRoi.textContent = "–";
+    elements.backtestAverageProfit.textContent = "–";
+    elements.backtestAverageHold.textContent = "–";
+    elements.backtestDrawdown.textContent = "–";
+    return;
+  }
+
+  const simulations = itemCatalog
+    .map((item) => ({ item, ...simulateItemBacktest(item, settings, horizon) }));
+  const results = simulations
+    .filter(({ trades }) => trades.length > 0)
+    .sort((left, right) => right.totalProfit - left.totalProfit);
+  const allTrades = results.flatMap(({ trades }) => trades);
+  const totalProfit = allTrades.reduce((total, trade) => total + trade.netProfit, 0);
+  const profitableTrades = allTrades.filter((trade) => trade.netProfit > 0).length;
+  const incompleteSignals = simulations.reduce((total, result) => total + result.incompleteSignals, 0);
+
+  elements.backtestTrades.textContent = numberFormat.format(allTrades.length);
+  elements.backtestWinRate.textContent = allTrades.length
+    ? formatPercent(profitableTrades / allTrades.length)
+    : "–";
+  elements.backtestAverageRoi.textContent = allTrades.length
+    ? formatPercent(allTrades.reduce((total, trade) => total + trade.roi, 0) / allTrades.length)
+    : "–";
+  elements.backtestAverageProfit.textContent = allTrades.length
+    ? formatSignedMoney(Math.round(totalProfit / allTrades.length))
+    : "–";
+  elements.backtestAverageHold.textContent = allTrades.length
+    ? `${numberFormat.format(allTrades.reduce((total, trade) => total + trade.holdingHours, 0) / allTrades.length)} Std.`
+    : "–";
+  elements.backtestDrawdown.textContent = allTrades.length
+    ? formatPercent(Math.max(...allTrades.map((trade) => trade.maxAdverseExcursion)))
+    : "–";
+
+  for (const { item, trades, totalProfit: itemProfit, profitableTrades: itemWinners, targetTrades, averageRoi, averageHoldingHours, maxAdverseExcursion } of results.slice(0, MAX_CANDIDATES)) {
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    nameCell.append(createItemButton(item, { scrollToChart: true }));
+    const tradeCell = document.createElement("td");
+    tradeCell.textContent = numberFormat.format(trades.length);
+    const winCell = document.createElement("td");
+    winCell.textContent = `${formatPercent(itemWinners / trades.length)} (${targetTrades} Ziel)`;
+    const roiCell = document.createElement("td");
+    roiCell.textContent = formatPercent(averageRoi);
+    const profitCell = document.createElement("td");
+    profitCell.textContent = formatSignedMoney(itemProfit);
+    const holdCell = document.createElement("td");
+    holdCell.textContent = `${numberFormat.format(averageHoldingHours)} Std.`;
+    const drawdownCell = document.createElement("td");
+    drawdownCell.textContent = formatPercent(maxAdverseExcursion);
+    row.append(nameCell, tradeCell, winCell, roiCell, profitCell, holdCell, drawdownCell);
+    elements.backtestRows.append(row);
+  }
+
+  if (results.length === 0) {
+    appendEmptyRow(elements.backtestRows, "Mit diesen Filtern wurden keine vollständig auswertbaren Kaufgelegenheiten gefunden.", 7);
+  }
+  elements.backtestStatus.textContent = `${results.length} Items mit mindestens einem vollständigen Trade${results.length > MAX_CANDIDATES ? ` · erste ${MAX_CANDIDATES} nach Gesamtgewinn angezeigt` : ""} · ${numberFormat.format(incompleteSignals)} Kaufsignale nahe dem Datenende wegen fehlender Haltedauer ausgeschlossen. Kauflimit: Q25 der bis dahin bekannten Medianpreise; Verkauf: erster Folge-Scan mit mindestens dem eingestellten Mindest-ROI, sonst Bewertung am Horizont. Gesamtgewinn ${formatSignedMoney(totalProfit)} über alle simulierten Trades.`;
 }
 
 function showSuggestions() {
@@ -117,13 +627,16 @@ function showSuggestions() {
     : "Keine passenden Items gefunden.";
 }
 
-function selectItem(item) {
+function selectItem(item, { scrollToChart = false } = {}) {
   selectedItemId = item.itemID;
   elements.search.value = item.itemName;
   elements.suggestions.hidden = true;
   elements.search.setAttribute("aria-expanded", "false");
   elements.searchHint.textContent = `Item-ID ${item.itemID}`;
   renderChart();
+  if (scrollToChart) {
+    elements.chartPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function renderChart() {
@@ -147,9 +660,42 @@ function renderChart() {
   elements.chartEmpty.hidden = true;
   elements.chartContent.hidden = false;
   elements.chartTitle.textContent = points[0].item.itemName;
+  elements.wowheadLink.href = `https://www.wowhead.com/forever/de/item=${selectedItemId}`;
+  elements.wowheadLink.setAttribute("aria-label", `Wowhead-Datenbank für ${points[0].item.itemName} in neuem Tab öffnen`);
   elements.chartSubtitle.textContent = `Item-ID ${selectedItemId} · ${points.length} ${points.length === 1 ? "Messpunkt" : "Messpunkte"} · Vendor Sell Price ${formatMoney(points[0].item.vendorSellPrice)}`;
   elements.metricSelect.value = selectedMetric;
+  renderSelectedTradingMetrics();
   drawChart(points);
+}
+
+function formatSignedMoney(value) {
+  return `${value < 0 ? "−" : ""}${formatMoney(Math.abs(value))}`;
+}
+
+function renderSelectedTradingMetrics() {
+  if (selectedItemId === null) {
+    elements.selectedTradingMetrics.hidden = true;
+    return;
+  }
+  const stats = getMarketStats(selectedItemId);
+  if (!stats) {
+    elements.selectedTradingMetrics.hidden = false;
+    elements.selectedRoi.textContent = "Nicht verfügbar";
+    elements.selectedProfit.textContent = "Nicht verfügbar";
+    elements.selectedThresholds.textContent = "Für dieses Item liegen keine ausreichenden Preisdaten vor.";
+    return;
+  }
+  const settings = getTradingSettings();
+  elements.selectedTradingMetrics.hidden = false;
+  elements.selectedRoi.textContent = Number.isFinite(stats.roi) ? formatPercent(stats.roi) : "Nicht verfügbar";
+  elements.selectedProfit.textContent = formatSignedMoney(stats.netProfit);
+  const roiLimit = settings.maximumRoi === null
+    ? `${formatPercent(settings.minimumRoi)} bis ohne Obergrenze`
+    : `${formatPercent(settings.minimumRoi)} bis ${formatPercent(settings.maximumRoi)}`;
+  const profitLimit = settings.maximumProfit === null
+    ? `${formatMoney(settings.minimumProfit)} bis ohne Obergrenze`
+    : `${formatMoney(settings.minimumProfit)} bis ${formatMoney(settings.maximumProfit)}`;
+  elements.selectedThresholds.textContent = `Aktive Handelsfilter: ROI ${roiLimit} · Nettogewinn ${profitLimit} pro Stück.`;
 }
 
 function drawChart(points) {
@@ -291,6 +837,17 @@ elements.metricSelect.addEventListener("change", () => {
   selectedMetric = elements.metricSelect.value;
   if (selectedItemId !== null) renderChart();
 });
+for (const input of [
+  elements.feeInput,
+  elements.roiInput,
+  elements.maxRoiInput,
+  elements.profitInput,
+  elements.maxProfitInput,
+  elements.observationsInput,
+  elements.backtestHorizon,
+]) {
+  input.addEventListener("input", renderMarketViews);
+}
 elements.search.addEventListener("keydown", (event) => {
   if (elements.suggestions.hidden || suggestionItems.length === 0) return;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -336,7 +893,11 @@ async function initialize() {
     const response = await fetch("./scans.json");
     if (!response.ok) throw new Error(`Scandaten konnten nicht geladen werden (HTTP ${response.status}).`);
     validateData(await response.json());
+    elements.backtestHorizon.max = String(scans.length - 1);
     elements.scanCount.textContent = `${scans.length} Scans`;
+    elements.datasetNote.textContent = `Datenstand: ${formatTimestamp(scans[scans.length - 1].timestamp)} UTC · Verkaufsreferenz: 25%-Quantil der jüngsten Scan-Medianpreise. Preiseingaben in Kupfer (1000 = 10s).`;
+    loadWatchlist();
+    renderMarketViews();
     elements.workspace.hidden = false;
     elements.loading.hidden = true;
   } catch (error) {

@@ -33,6 +33,12 @@
         </div>
         <p id="search-hint" class="search-hint">Items aus allen Scans durchsuchen.</p>
       </div>
+      <nav class="section-nav" aria-label="Seitennavigation">
+        <a href="#chart-panel">Preisverlauf entdecken</a>
+        <a href="#trading-analysis">Handelsanalyse</a>
+        <a href="#watchlist">Watchlist</a>
+        <a href="#backtest">Backtest</a>
+      </nav>
     </header>
 
     <main>
@@ -47,7 +53,10 @@
             <div class="chart-heading">
               <div>
                 <span class="eyebrow">PREISENTWICKLUNG</span>
-                <h2 id="chart-title"></h2>
+                <div class="selected-item-heading">
+                  <h2 id="chart-title"></h2>
+                  <a id="wowhead-link" class="external-item-link" target="_blank" rel="noopener noreferrer">Wowhead-Datenbank ↗</a>
+                </div>
               </div>
               <div class="chart-controls">
                 <span id="chart-subtitle" class="muted chart-subtitle"></span>
@@ -63,10 +72,144 @@
                 </label>
               </div>
             </div>
+            <div id="selected-trading-metrics" class="selected-trading-metrics" hidden aria-live="polite">
+              <div class="trading-summary-value">
+                <span>Geschätzter Netto-ROI</span>
+                <strong id="selected-roi"></strong>
+              </div>
+              <div class="trading-summary-value">
+                <span>Geschätzter Nettogewinn / Stück</span>
+                <strong id="selected-profit"></strong>
+              </div>
+              <p id="selected-thresholds" class="trading-summary-thresholds"></p>
+            </div>
             <div id="chart" class="chart" role="img"></div>
             <div id="chart-tooltip" class="chart-tooltip" hidden></div>
           </div>
         </section>
+
+        <section id="trading-analysis" class="market-panel">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">HANDELSANALYSE</span>
+              <h2>Handelskandidaten</h2>
+              <p class="muted">Schwellenwerte basieren auf den jüngsten Scan-Medianen. Angebote und Bestände sind keine abgeschlossenen Verkäufe.</p>
+            </div>
+          </div>
+          <div class="filters" aria-label="Kandidatenfilter">
+            <label class="filter-field">
+              <span>Auktionsgebühr (%)</span>
+              <input id="fee-input" type="number" min="0" max="100" step="0.1" value="5">
+            </label>
+            <label class="filter-field">
+              <span>Mindest-ROI (%)</span>
+              <input id="roi-input" type="number" min="0" max="1000" step="1" value="20">
+            </label>
+            <label class="filter-field">
+              <span>Maximaler ROI (%)</span>
+              <input id="max-roi-input" type="number" min="0" max="1000" step="1" placeholder="Ohne Limit">
+            </label>
+            <label class="filter-field">
+              <span>Mindestgewinn</span>
+              <input id="profit-input" type="number" min="0" step="1" value="1000" aria-describedby="profit-help">
+              <small id="profit-help">Kupfer pro Stück</small>
+            </label>
+            <label class="filter-field">
+              <span>Maximaler Gewinn</span>
+              <input id="max-profit-input" type="number" min="0" step="1" placeholder="Ohne Limit" aria-describedby="max-profit-help">
+              <small id="max-profit-help">Kupfer pro Stück</small>
+            </label>
+            <label class="filter-field">
+              <span>Min. Beobachtungen</span>
+              <input id="observations-input" type="number" min="1" step="1" value="5">
+            </label>
+          </div>
+          <p id="dataset-note" class="filter-note">Verkaufsreferenz: 25%-Quantil der jüngsten Scan-Medianpreise. Alle Preiseingaben sind Kupfer; z. B. 1000 = 10s.</p>
+          <div class="table-scroll">
+            <table class="market-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Lowest letzter Scan</th>
+                  <th>Konserv. Verkauf</th>
+                  <th>Max. Kauf</th>
+                  <th>Netto-Gewinn / ROI</th>
+                  <th>Bestand / Trend</th>
+                  <th>Datenlage</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="candidate-rows"></tbody>
+            </table>
+          </div>
+          <p id="candidate-status" class="table-status" aria-live="polite"></p>
+        </section>
+
+        <section id="watchlist" class="market-panel watchlist-panel">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">LOKAL GESPEICHERT</span>
+              <h2>Watchlist <span id="watchlist-count" class="count-badge">0</span></h2>
+              <p class="muted">Kauf- und Verkaufsziele werden in diesem Browser gespeichert.</p>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="market-table watchlist-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Lowest letzter Scan</th>
+                  <th>Kauflimit (Kupfer)</th>
+                  <th>Verkaufsziel (Kupfer)</th>
+                  <th>Signal</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="watchlist-rows"></tbody>
+            </table>
+          </div>
+          <p id="watchlist-status" class="table-status" role="status"></p>
+        </section>
+
+        <section id="backtest" class="market-panel backtest-panel">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">HISTORISCHE SIMULATION</span>
+              <h2>Backtest</h2>
+              <p class="muted">Kaufsignale verwenden nur vorherige Scans. Verkäufe werden mit späteren Scan-Medianen angenähert, nicht mit echten Verkaufsdaten.</p>
+            </div>
+            <label class="filter-field backtest-horizon">
+              <span>Max. Haltedauer (Item-Scans)</span>
+              <input id="backtest-horizon" type="number" min="1" step="1" value="5">
+            </label>
+          </div>
+          <div class="backtest-summary" aria-live="polite">
+            <div><span>Geschlossene Trades</span><strong id="backtest-trades">–</strong></div>
+            <div><span>Profitabel</span><strong id="backtest-win-rate">–</strong></div>
+            <div><span>Ø ROI / Trade</span><strong id="backtest-average-roi">–</strong></div>
+            <div><span>Ø Nettogewinn / Trade</span><strong id="backtest-average-profit">–</strong></div>
+            <div><span>Ø Haltedauer</span><strong id="backtest-average-hold">–</strong></div>
+            <div><span>Max. beobachteter Rückgang</span><strong id="backtest-drawdown">–</strong></div>
+          </div>
+          <p id="backtest-status" class="filter-note" aria-live="polite"></p>
+          <div class="table-scroll">
+            <table class="market-table backtest-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Trades</th>
+                  <th>Profitabel</th>
+                  <th>Ø ROI</th>
+                  <th>Gesamtgewinn</th>
+                  <th>Ø Haltedauer</th>
+                  <th>Max. Rückgang</th>
+                </tr>
+              </thead>
+              <tbody id="backtest-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
       </section>
       <div id="loading" class="status-message">Scandaten werden geladen …</div>
       <div id="error" class="status-message error" role="alert" hidden></div>
