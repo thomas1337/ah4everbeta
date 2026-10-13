@@ -796,13 +796,13 @@ function formatMetricValue(value, format) {
 
 function showTooltip(point, event, pointX, pointY) {
   const rows = [
-    ["Item ID", numberFormat.format(point.item.itemID)],
-    ["Available Quantity", numberFormat.format(point.item.availableQuantity)],
-    ["Vendor Sell Price", formatMoney(point.item.vendorSellPrice)],
-    ["Average Price", formatMoney(point.item.averagePrice)],
-    ["Median Price", formatMoney(point.item.medianPrice)],
-    ["Lowest Buyout", formatMoney(point.item.lowestBuyout)],
-    ["Highest Buyout", formatMoney(point.item.highestBuyout)],
+    [null, "Item ID", numberFormat.format(point.item.itemID)],
+    ["availableQuantity", "Available Quantity", numberFormat.format(point.item.availableQuantity)],
+    [null, "Vendor Sell Price", formatMoney(point.item.vendorSellPrice)],
+    ["averagePrice", "Average Price", formatMoney(point.item.averagePrice)],
+    ["medianPrice", "Median Price", formatMoney(point.item.medianPrice)],
+    ["lowestBuyout", "Lowest Buyout", formatMoney(point.item.lowestBuyout)],
+    ["highestBuyout", "Highest Buyout", formatMoney(point.item.highestBuyout)],
   ];
   elements.tooltip.replaceChildren();
   const heading = document.createElement("div");
@@ -810,11 +810,15 @@ function showTooltip(point, event, pointX, pointY) {
   heading.textContent = formatTimestamp(point.timestamp);
   const grid = document.createElement("div");
   grid.className = "tooltip-grid";
-  for (const [label, value] of rows) {
+  for (const [metric, label, value] of rows) {
     const title = document.createElement("span");
     title.textContent = label;
     const content = document.createElement("strong");
     content.textContent = value;
+    if (metric === selectedMetric) {
+      title.classList.add("selected-y-metric");
+      content.classList.add("selected-y-metric");
+    }
     grid.append(title, content);
   }
   elements.tooltip.append(heading, grid);

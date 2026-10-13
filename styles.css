@@ -131,6 +131,7 @@ input[type="search"] { width: 100%; padding: 11px 12px; border: 1px solid #35425
 .tooltip-heading { margin-bottom: 9px; color: var(--accent); font-weight: 700; }
 .tooltip-grid { display: grid; grid-template-columns: 1fr auto; gap: 6px 14px; color: var(--muted); }
 .tooltip-grid strong { color: #e5eaf4; font-weight: 600; text-align: right; }
+.tooltip-grid .selected-y-metric { color: #f3c47e; font-weight: 800; }
 .status-message { margin: 40px auto; color: var(--muted); text-align: center; }
 .status-message.error { max-width: 700px; padding: 16px; border: 1px solid #813b45; border-radius: 9px; color: #ffb7bc; background: #301821; }
 

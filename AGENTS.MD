@@ -12,7 +12,7 @@
 - `scans.json` contains `scans`, an ascending array of `{ timestamp, items }`; each item has `itemName`, `itemID`, and its auction metrics.
 - Raw price fields are copper. Use the shared money formatter for every price display; omit zero gold and silver denominations, but always show copper (for example, `65c`, `1s 0c`, `1g 23s 45c`).
 - Search starts at two characters and returns all matching item names across scans. Keep suggestions keyboard accessible.
-- The chart's default Y metric is `lowestBuyout`. Keep its selectable metrics and axis labels in sync with the series, scale, point labels, and tooltips.
+- The chart's default Y metric is `lowestBuyout`. Keep its selectable metrics and axis labels in sync with the series, scale, point labels, and tooltips; emphasize the selected Y metric in the point hover/focus tooltip.
 - Plot X positions using elapsed time between timestamps, not evenly spaced observation indices. Avoid overlapping date labels without changing point positions.
 - The selected-item chart includes current trade estimates and a Wowhead link. Set that link from the selected item's numeric ID, and open it in a new tab with `rel="noopener noreferrer"`.
 - Keep the sticky-header section navigation anchors in sync with the chart, trading analysis, watchlist, and backtest sections. Preserve scroll offsets below the sticky header and honor reduced-motion preferences.
