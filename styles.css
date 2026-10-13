@@ -110,6 +110,9 @@ input[type="search"] { width: 100%; padding: 11px 12px; border: 1px solid #35425
 .trading-summary-value { display: grid; gap: 5px; }
 .trading-summary-value span, .trading-summary-thresholds { color: var(--muted); font-size: 11px; }
 .trading-summary-value strong { color: #f3c47e; font-size: 15px; }
+.trading-summary-swings { grid-column: 1 / -1; }
+.swing-roi-list { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 12px; }
+.trading-summary-swings .swing-roi-value { padding: 4px 7px; border: 1px solid #35425a; border-radius: 6px; color: #f3c47e; background: #111a2b; font-size: 12px; font-weight: 700; cursor: help; }
 .trading-summary-thresholds { grid-column: 1 / -1; margin: 0; line-height: 1.5; }
 .chart-controls { display: flex; align-items: flex-end; gap: 18px; }
 .chart-subtitle { font-size: 12px; white-space: nowrap; }

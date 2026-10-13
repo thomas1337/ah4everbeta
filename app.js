@@ -25,6 +25,7 @@ const WATCHLIST_STORAGE_KEY = "ahscans-watchlist-v1";
 const MAX_CANDIDATES = 100;
 const REFERENCE_WINDOW = 5;
 const MAX_DATA_AGE_HOURS = 72;
+const swingPercentFormat = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
 
 const elements = {
   scanCount: document.querySelector("#scan-count"),
@@ -44,11 +45,7 @@ const elements = {
   selectedTradingMetrics: document.querySelector("#selected-trading-metrics"),
   selectedRoi: document.querySelector("#selected-roi"),
   selectedProfit: document.querySelector("#selected-profit"),
-  selectedMinSwings: document.querySelector("#selected-min-swings"),
-  selectedMinSwingRoi: document.querySelector("#selected-min-swing-roi"),
-  selectedMinStock: document.querySelector("#selected-min-stock"),
-  selectedMaxGap: document.querySelector("#selected-max-gap"),
-  selectedMaxSwingCv: document.querySelector("#selected-max-swing-cv"),
+  selectedSwingRois: document.querySelector("#selected-swing-rois"),
   selectedThresholds: document.querySelector("#selected-thresholds"),
   metricSelect: document.querySelector("#metric-select"),
   chart: document.querySelector("#chart"),
@@ -197,7 +194,15 @@ function getSwingStats(history, feeRate, minimumSwingRoi) {
     } else if (point.item.lowestBuyout >= trough.item.lowestBuyout * factor) {
       const netSwingRoi = (confirmedHigh.item.lowestBuyout * (1 - feeRate) - low.item.lowestBuyout) / low.item.lowestBuyout;
       const durationHours = (trough.time - low.time) / 3600000;
-      if (netSwingRoi >= minimumSwingRoi && durationHours > 0) swings.push({ netSwingRoi, durationHours });
+      if (netSwingRoi >= minimumSwingRoi && durationHours > 0) {
+        swings.push({
+          netSwingRoi,
+          durationHours,
+          lowTimestamp: low.timestamp,
+          peakTimestamp: confirmedHigh.timestamp,
+          confirmationTimestamp: trough.timestamp,
+        });
+      }
       low = trough;
       direction = 1;
       peak = point;
@@ -784,11 +789,7 @@ function renderSelectedTradingMetrics() {
     elements.selectedTradingMetrics.hidden = false;
     elements.selectedRoi.textContent = "Nicht verfügbar";
     elements.selectedProfit.textContent = "Nicht verfügbar";
-    elements.selectedMinSwings.textContent = "Nicht verfügbar";
-    elements.selectedMinSwingRoi.textContent = "Nicht verfügbar";
-    elements.selectedMinStock.textContent = "Nicht verfügbar";
-    elements.selectedMaxGap.textContent = "Nicht verfügbar";
-    elements.selectedMaxSwingCv.textContent = "Nicht verfügbar";
+    elements.selectedSwingRois.textContent = "Nicht verfügbar";
     elements.selectedThresholds.textContent = "Für dieses Item liegen keine ausreichenden Preisdaten vor.";
     return;
   }
@@ -796,11 +797,18 @@ function renderSelectedTradingMetrics() {
   elements.selectedTradingMetrics.hidden = false;
   elements.selectedRoi.textContent = Number.isFinite(stats.roi) ? formatPercent(stats.roi) : "Nicht verfügbar";
   elements.selectedProfit.textContent = formatSignedMoney(stats.netProfit);
-  elements.selectedMinSwings.textContent = numberFormat.format(settings.minimumSwings);
-  elements.selectedMinSwingRoi.textContent = formatPercent(settings.minimumSwingRoi);
-  elements.selectedMinStock.textContent = numberFormat.format(settings.minimumStock);
-  elements.selectedMaxGap.textContent = `${numberFormat.format(settings.maximumGapHours)} Std.`;
-  elements.selectedMaxSwingCv.textContent = formatPercent(settings.maximumSwingCv);
+  elements.selectedSwingRois.replaceChildren();
+  if (stats.swings.length === 0) {
+    elements.selectedSwingRois.textContent = "Keine passenden abgeschlossenen Zyklen";
+  } else {
+    for (const swing of stats.swings) {
+      const value = document.createElement("strong");
+      value.className = "swing-roi-value";
+      value.textContent = `${swingPercentFormat.format(swing.netSwingRoi * 100)}%`;
+      value.title = `Tief ${formatTimestamp(swing.lowTimestamp)} · Hoch ${formatTimestamp(swing.peakTimestamp)} · Zyklus bestätigt ${formatTimestamp(swing.confirmationTimestamp)}`;
+      elements.selectedSwingRois.append(value);
+    }
+  }
   const roiLimit = settings.maximumRoi === null
     ? `${formatPercent(settings.minimumRoi)} bis ohne Obergrenze`
     : `${formatPercent(settings.minimumRoi)} bis ${formatPercent(settings.maximumRoi)}`;
