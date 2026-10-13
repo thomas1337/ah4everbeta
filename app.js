@@ -44,6 +44,11 @@ const elements = {
   selectedTradingMetrics: document.querySelector("#selected-trading-metrics"),
   selectedRoi: document.querySelector("#selected-roi"),
   selectedProfit: document.querySelector("#selected-profit"),
+  selectedMinSwings: document.querySelector("#selected-min-swings"),
+  selectedMinSwingRoi: document.querySelector("#selected-min-swing-roi"),
+  selectedMinStock: document.querySelector("#selected-min-stock"),
+  selectedMaxGap: document.querySelector("#selected-max-gap"),
+  selectedMaxSwingCv: document.querySelector("#selected-max-swing-cv"),
   selectedThresholds: document.querySelector("#selected-thresholds"),
   metricSelect: document.querySelector("#metric-select"),
   chart: document.querySelector("#chart"),
@@ -54,6 +59,11 @@ const elements = {
   profitInput: document.querySelector("#profit-input"),
   maxProfitInput: document.querySelector("#max-profit-input"),
   observationsInput: document.querySelector("#observations-input"),
+  minSwingsInput: document.querySelector("#min-swings-input"),
+  minSwingRoiInput: document.querySelector("#min-swing-roi-input"),
+  minStockInput: document.querySelector("#min-stock-input"),
+  maxGapInput: document.querySelector("#max-gap-input"),
+  maxSwingCvInput: document.querySelector("#max-swing-cv-input"),
   candidateRows: document.querySelector("#candidate-rows"),
   candidateStatus: document.querySelector("#candidate-status"),
   watchlistRows: document.querySelector("#watchlist-rows"),
@@ -139,6 +149,74 @@ function getTradingSettings() {
     minimumProfit: Number(elements.profitInput.value),
     maximumProfit: elements.maxProfitInput.value.trim() === "" ? null : Number(elements.maxProfitInput.value),
     minimumObservations: Number(elements.observationsInput.value),
+    minimumSwings: Number(elements.minSwingsInput.value),
+    minimumSwingRoi: Number(elements.minSwingRoiInput.value) / 100,
+    minimumStock: Number(elements.minStockInput.value),
+    maximumGapHours: Number(elements.maxGapInput.value),
+    maximumSwingCv: Number(elements.maxSwingCvInput.value) / 100,
+  };
+}
+
+function getSwingStats(history, feeRate, minimumSwingRoi) {
+  const timedHistory = history.map((entry) => ({
+    ...entry,
+    time: Date.parse(entry.timestamp),
+  }));
+  const scanGaps = timedHistory.slice(1).map((entry, index) => (entry.time - timedHistory[index].time) / 3600000);
+  const maximumGapHours = scanGaps.length ? Math.max(...scanGaps) : 0;
+  const stockQuantile = quantile(history.map(({ item }) => item.availableQuantity), 0.25);
+  const factor = (1 + minimumSwingRoi) / (1 - feeRate);
+  const points = timedHistory.filter(({ item }) => item.lowestBuyout > 0);
+  const swings = [];
+  if (points.length < 3) return { swings, stockQuantile, maximumGapHours, medianSwingRoi: null, timingCv: null };
+
+  let direction = 0;
+  let low = points[0];
+  let peak = points[0];
+  let trough = points[0];
+  let confirmedHigh = null;
+  for (const point of points.slice(1)) {
+    if (direction === 0) {
+      if (point.item.lowestBuyout <= low.item.lowestBuyout) {
+        low = point;
+        peak = point;
+      } else if (point.item.lowestBuyout >= low.item.lowestBuyout * factor) {
+        direction = 1;
+        peak = point;
+      }
+    } else if (direction === 1) {
+      if (point.item.lowestBuyout >= peak.item.lowestBuyout) {
+        peak = point;
+      } else if (point.item.lowestBuyout <= peak.item.lowestBuyout / factor) {
+        confirmedHigh = peak;
+        direction = -1;
+        trough = point;
+      }
+    } else if (point.item.lowestBuyout <= trough.item.lowestBuyout) {
+      trough = point;
+    } else if (point.item.lowestBuyout >= trough.item.lowestBuyout * factor) {
+      const netSwingRoi = (confirmedHigh.item.lowestBuyout * (1 - feeRate) - low.item.lowestBuyout) / low.item.lowestBuyout;
+      const durationHours = (trough.time - low.time) / 3600000;
+      if (netSwingRoi >= minimumSwingRoi && durationHours > 0) swings.push({ netSwingRoi, durationHours });
+      low = trough;
+      direction = 1;
+      peak = point;
+    }
+  }
+
+  const durations = swings.map((swing) => swing.durationHours);
+  const averageDuration = durations.length
+    ? durations.reduce((total, duration) => total + duration, 0) / durations.length
+    : 0;
+  const durationVariance = durations.length
+    ? durations.reduce((total, duration) => total + (duration - averageDuration) ** 2, 0) / durations.length
+    : 0;
+  return {
+    swings,
+    stockQuantile,
+    maximumGapHours,
+    medianSwingRoi: swings.length ? median(swings.map((swing) => swing.netSwingRoi)) : null,
+    timingCv: averageDuration > 0 ? Math.sqrt(durationVariance) / averageDuration : null,
   };
 }
 
@@ -169,6 +247,7 @@ function getMarketStats(itemId) {
   const averageMedianRatio = latest.item.medianPrice > 0
     ? latest.item.averagePrice / latest.item.medianPrice
     : Number.POSITIVE_INFINITY;
+  const swingStats = getSwingStats(history, settings.feeRate, settings.minimumSwingRoi);
   return {
     history,
     recent,
@@ -181,6 +260,7 @@ function getMarketStats(itemId) {
     roi,
     inventoryChange,
     averageMedianRatio,
+    ...swingStats,
     observationCount: history.length,
     isStable: priceVariation <= 0.3,
     isFresh: ageHours <= MAX_DATA_AGE_HOURS,
@@ -222,8 +302,8 @@ function renderCandidates() {
     && Number.isInteger(settings.minimumObservations) && settings.minimumObservations >= 1;
   elements.candidateRows.replaceChildren();
   if (!settingsValid) {
-    appendEmptyRow(elements.candidateRows, "Bitte gültige Filter eingeben. Obergrenzen müssen mindestens so hoch wie die jeweilige Untergrenze sein.", 8);
-    elements.candidateStatus.textContent = "Die Gebühr muss unter 100 % liegen; Beträge in Kupfer müssen ganze, nicht-negative Werte sein.";
+    appendEmptyRow(elements.candidateRows, "Bitte gültige Filter eingeben. Obergrenzen müssen mindestens so hoch wie die jeweilige Untergrenze sein.", 13);
+    elements.candidateStatus.textContent = "Die Gebühr muss unter 100 % liegen; Beträge in Kupfer und Bestandsgrenzen müssen ganze, nicht-negative Werte sein.";
     renderSelectedTradingMetrics();
     return;
   }
@@ -237,7 +317,13 @@ function renderCandidates() {
       || stats.netProfit < settings.minimumProfit
       || (settings.maximumProfit !== null && stats.netProfit > settings.maximumProfit)
       || stats.roi < settings.minimumRoi
-      || (settings.maximumRoi !== null && stats.roi > settings.maximumRoi)) return [];
+      || (settings.maximumRoi !== null && stats.roi > settings.maximumRoi)
+      || stats.swings.length < settings.minimumSwings
+      || stats.medianSwingRoi < settings.minimumSwingRoi
+      || stats.stockQuantile < settings.minimumStock
+      || stats.maximumGapHours > settings.maximumGapHours
+      || stats.timingCv === null
+      || stats.timingCv > settings.maximumSwingCv) return [];
     return [{ item, stats }];
   }).sort((left, right) => right.stats.netProfit - left.stats.netProfit);
 
@@ -264,6 +350,16 @@ function renderCandidates() {
       ? "Trend nicht verfügbar"
       : `Bestand ${stats.inventoryChange > 0 ? "+" : ""}${formatPercent(stats.inventoryChange)}`;
     stockCell.append(stockTrend);
+    const swingCountCell = document.createElement("td");
+    swingCountCell.textContent = numberFormat.format(stats.swings.length);
+    const swingRoiCell = document.createElement("td");
+    swingRoiCell.textContent = formatPercent(stats.medianSwingRoi);
+    const timingCvCell = document.createElement("td");
+    timingCvCell.textContent = formatPercent(stats.timingCv);
+    const stockQuantileCell = document.createElement("td");
+    stockQuantileCell.textContent = numberFormat.format(stats.stockQuantile);
+    const maxGapCell = document.createElement("td");
+    maxGapCell.textContent = `${numberFormat.format(stats.maximumGapHours)} Std.`;
     const confidenceCell = document.createElement("td");
     const averageIsOutlier = stats.averageMedianRatio > 2 || stats.averageMedianRatio < 0.5;
     const confidenceLabel = stats.isFresh && stats.observationCount >= Math.max(settings.minimumObservations, 5) && stats.isStable && !averageIsOutlier
@@ -285,13 +381,14 @@ function renderCandidates() {
     addButton.disabled = alreadyWatching;
     addButton.addEventListener("click", () => addToWatchlist(item, stats));
     actionCell.append(addButton);
-    row.append(nameCell, lowestCell, referenceCell, buyCell, profitCell, stockCell, confidenceCell, actionCell);
+    row.append(nameCell, lowestCell, referenceCell, buyCell, profitCell, stockCell, swingCountCell, swingRoiCell, timingCvCell, stockQuantileCell, maxGapCell, confidenceCell, actionCell);
     elements.candidateRows.append(row);
   }
 
+  const filterSummary = `Filter: mind. ${settings.minimumSwings} bestätigte Schwankungen mit ${formatPercent(settings.minimumSwingRoi)} Netto-Swing-ROI · Bestand Q25 mind. ${numberFormat.format(settings.minimumStock)} · max. Scan-Abstand ${numberFormat.format(settings.maximumGapHours)} Std. · Zyklus-Zeit-CV max. ${formatPercent(settings.maximumSwingCv)}.`;
   elements.candidateStatus.textContent = candidates.length === 0
-    ? "Keine Kandidaten erfüllen derzeit alle Schwellenwerte."
-    : `${candidates.length} Kandidaten gefunden${candidates.length > MAX_CANDIDATES ? ` · erste ${MAX_CANDIDATES} nach erwartetem Netto-Gewinn angezeigt` : ""}. Gewinnschätzung gilt pro Stück und unterstellt den Verkauf zum konservativen Referenzpreis.`;
+    ? `Keine Kandidaten erfüllen derzeit die Handels- und Schwankungsfilter. ${filterSummary}`
+    : `${candidates.length} Kandidaten gefunden${candidates.length > MAX_CANDIDATES ? ` · erste ${MAX_CANDIDATES} nach erwartetem Netto-Gewinn angezeigt` : ""}. Gewinnschätzung gilt pro Stück und unterstellt den Verkauf zum konservativen Referenzpreis. ${filterSummary}`;
   renderSelectedTradingMetrics();
 }
 
@@ -522,7 +619,12 @@ function renderBacktest() {
     && (settings.maximumRoi === null || (Number.isFinite(settings.maximumRoi) && settings.maximumRoi >= settings.minimumRoi))
     && Number.isSafeInteger(settings.minimumProfit) && settings.minimumProfit >= 0
     && (settings.maximumProfit === null || (Number.isSafeInteger(settings.maximumProfit) && settings.maximumProfit >= settings.minimumProfit))
-    && Number.isInteger(settings.minimumObservations) && settings.minimumObservations >= 1;
+    && Number.isInteger(settings.minimumObservations) && settings.minimumObservations >= 1
+    && Number.isInteger(settings.minimumSwings) && settings.minimumSwings >= 1
+    && Number.isFinite(settings.minimumSwingRoi) && settings.minimumSwingRoi >= 0
+    && Number.isSafeInteger(settings.minimumStock) && settings.minimumStock >= 0
+    && Number.isFinite(settings.maximumGapHours) && settings.maximumGapHours > 0
+    && Number.isFinite(settings.maximumSwingCv) && settings.maximumSwingCv >= 0;
   elements.backtestRows.replaceChildren();
   if (!validSettings || !Number.isInteger(horizon) || horizon < 1 || horizon >= scans.length) {
     appendEmptyRow(elements.backtestRows, "Bitte gültige Handelsfilter und eine Haltedauer kleiner als die Scan-Anzahl eingeben.", 7);
@@ -682,6 +784,11 @@ function renderSelectedTradingMetrics() {
     elements.selectedTradingMetrics.hidden = false;
     elements.selectedRoi.textContent = "Nicht verfügbar";
     elements.selectedProfit.textContent = "Nicht verfügbar";
+    elements.selectedMinSwings.textContent = "Nicht verfügbar";
+    elements.selectedMinSwingRoi.textContent = "Nicht verfügbar";
+    elements.selectedMinStock.textContent = "Nicht verfügbar";
+    elements.selectedMaxGap.textContent = "Nicht verfügbar";
+    elements.selectedMaxSwingCv.textContent = "Nicht verfügbar";
     elements.selectedThresholds.textContent = "Für dieses Item liegen keine ausreichenden Preisdaten vor.";
     return;
   }
@@ -689,6 +796,11 @@ function renderSelectedTradingMetrics() {
   elements.selectedTradingMetrics.hidden = false;
   elements.selectedRoi.textContent = Number.isFinite(stats.roi) ? formatPercent(stats.roi) : "Nicht verfügbar";
   elements.selectedProfit.textContent = formatSignedMoney(stats.netProfit);
+  elements.selectedMinSwings.textContent = numberFormat.format(settings.minimumSwings);
+  elements.selectedMinSwingRoi.textContent = formatPercent(settings.minimumSwingRoi);
+  elements.selectedMinStock.textContent = numberFormat.format(settings.minimumStock);
+  elements.selectedMaxGap.textContent = `${numberFormat.format(settings.maximumGapHours)} Std.`;
+  elements.selectedMaxSwingCv.textContent = formatPercent(settings.maximumSwingCv);
   const roiLimit = settings.maximumRoi === null
     ? `${formatPercent(settings.minimumRoi)} bis ohne Obergrenze`
     : `${formatPercent(settings.minimumRoi)} bis ${formatPercent(settings.maximumRoi)}`;
@@ -848,6 +960,11 @@ for (const input of [
   elements.profitInput,
   elements.maxProfitInput,
   elements.observationsInput,
+  elements.minSwingsInput,
+  elements.minSwingRoiInput,
+  elements.minStockInput,
+  elements.maxGapInput,
+  elements.maxSwingCvInput,
   elements.backtestHorizon,
 ]) {
   input.addEventListener("input", renderMarketViews);
@@ -899,7 +1016,7 @@ async function initialize() {
     validateData(await response.json());
     elements.backtestHorizon.max = String(scans.length - 1);
     elements.scanCount.textContent = `${scans.length} Scans`;
-    elements.datasetNote.textContent = `Datenstand: ${formatTimestamp(scans[scans.length - 1].timestamp)} UTC · Verkaufsreferenz: 25%-Quantil der jüngsten Scan-Medianpreise. Preiseingaben in Kupfer (1000 = 10s).`;
+    elements.datasetNote.textContent = `Datenstand: ${formatTimestamp(scans[scans.length - 1].timestamp)} UTC · Swing-Erkennung anhand Lowest Buyout; ROI nach Gebühr. Bestand und Verkauf sind Näherungen aus Angebotssnapshots, keine Verkaufsdaten.`;
     loadWatchlist();
     renderMarketViews();
     elements.workspace.hidden = false;

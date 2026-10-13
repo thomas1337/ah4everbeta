@@ -80,6 +80,7 @@ main { max-width: 1500px; margin: 0 auto; padding: 30px clamp(18px, 4vw, 56px) 6
 .watchlist-table input { width: 125px; }
 .empty-row { color: var(--muted); text-align: center; }
 .market-table tr:hover td { background: rgb(255 255 255 / 2%); }
+.market-table:not(.watchlist-table):not(.backtest-table) { min-width: 1450px; }
 .backtest-panel { margin-top: 22px; }
 .backtest-horizon { min-width: 190px; }
 .backtest-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }

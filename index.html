@@ -81,6 +81,26 @@
                 <span>Geschätzter Nettogewinn / Stück</span>
                 <strong id="selected-profit"></strong>
               </div>
+              <div class="trading-summary-value">
+                <span>Min. bestätigte Schwankungen</span>
+                <strong id="selected-min-swings"></strong>
+              </div>
+              <div class="trading-summary-value">
+                <span>Min. Netto-Swing-ROI</span>
+                <strong id="selected-min-swing-roi"></strong>
+              </div>
+              <div class="trading-summary-value">
+                <span>Min. Bestand (Q25)</span>
+                <strong id="selected-min-stock"></strong>
+              </div>
+              <div class="trading-summary-value">
+                <span>Max. Scan-Abstand</span>
+                <strong id="selected-max-gap"></strong>
+              </div>
+              <div class="trading-summary-value">
+                <span>Max. Zyklus-Zeit-CV</span>
+                <strong id="selected-max-swing-cv"></strong>
+              </div>
               <p id="selected-thresholds" class="trading-summary-thresholds"></p>
             </div>
             <div id="chart" class="chart" role="img"></div>
@@ -123,8 +143,28 @@
               <span>Min. Beobachtungen</span>
               <input id="observations-input" type="number" min="1" step="1" value="5">
             </label>
+            <label class="filter-field">
+              <span>Mind. bestätigte Schwankungen</span>
+              <input id="min-swings-input" type="number" min="1" step="1" value="3">
+            </label>
+            <label class="filter-field">
+              <span>Min. Netto-Swing-ROI (%)</span>
+              <input id="min-swing-roi-input" type="number" min="0" max="1000" step="1" value="20">
+            </label>
+            <label class="filter-field">
+              <span>Mind. Bestand (25%-Quantil)</span>
+              <input id="min-stock-input" type="number" min="0" step="1" value="500">
+            </label>
+            <label class="filter-field">
+              <span>Max. Scan-Abstand (Std.)</span>
+              <input id="max-gap-input" type="number" min="1" step="1" value="168">
+            </label>
+            <label class="filter-field">
+              <span>Max. Zeit-CV der Zyklen (%)</span>
+              <input id="max-swing-cv-input" type="number" min="0" step="1" value="100">
+            </label>
           </div>
-          <p id="dataset-note" class="filter-note">Verkaufsreferenz: 25%-Quantil der jüngsten Scan-Medianpreise. Alle Preiseingaben sind Kupfer; z. B. 1000 = 10s.</p>
+          <p id="dataset-note" class="filter-note">Schwankungen werden auf Lowest Buyout mit gebührenbereinigter Mindestrendite erkannt. Bestand: 25%-Quantil; Scan-Abstände basieren auf verstrichener Zeit. Verkaufsreferenz: 25%-Quantil der jüngsten Medianpreise. Preiseingaben sind Kupfer.</p>
           <div class="table-scroll">
             <table class="market-table">
               <thead>
@@ -135,6 +175,11 @@
                   <th>Max. Kauf</th>
                   <th>Netto-Gewinn / ROI</th>
                   <th>Bestand / Trend</th>
+                  <th>Schwankungen</th>
+                  <th>Median Swing-ROI</th>
+                  <th>Zeit-CV</th>
+                  <th>Bestand 25%-Quantil</th>
+                  <th>Max. Scan-Abstand</th>
                   <th>Datenlage</th>
                   <th></th>
                 </tr>
